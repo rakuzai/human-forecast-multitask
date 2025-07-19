@@ -1,0 +1,128 @@
+classification
+mlp: Loss: 0.2161 | Accuracy: 0.9078
+rnn: Loss: 0.1761 | Accuracy: 0.9395
+lstm: Loss: 0.2400 | Accuracy: 0.9600
+
+forecasting
+mlp: Loss: 0.0054 | MPJPE: 0.0553 (26.85)
+rnn: Loss: 0.0161 | MPJPE: 0.0677 (32.86)
+lstm: Loss: 0.0148 | MPJPE: 0.0611 (29.67)
+
+
+2 task in one run, classification + forecasting (simultanes)
+save estimatited pose in pkl, src, class
+
+
+Traceback (most recent call last):
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 129, in <module>
+    train(model, dataloader, task_type=task, num_epochs=20, lr=1e-3)
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 50, in train
+    forecast_out, class_out = model(src)
+                              ^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/HumanFall/Code/Models/rnn.py", line 11, in forward
+    out, _ = self.rnn(x)
+             ^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/rnn.py", line 677, in forward
+    raise ValueError(
+ValueError: RNN: Expected input to be 2D or 3D, got 4D tensor instead
+centive@titania:~/HumanFall/Code/Utils$ 
+
+
+Traceback (most recent call last):
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 129, in <module>
+    train(model, dataloader, task_type=task, num_epochs=20, lr=1e-3)
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 50, in train
+    forecast_out, class_out = model(src)
+                              ^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/HumanFall/Code/Models/lstm.py", line 11, in forward
+    out, _ = self.lstm(x)
+             ^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/rnn.py", line 1075, in forward
+    raise ValueError(
+ValueError: LSTM: Expected input to be 2D or 3D, got 4D instead
+
+
+/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/loss.py:610: UserWarning: Using a target size (torch.Size([32, 15, 17, 2])) that is different to the input size (torch.Size([32, 15, 34])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.mse_loss(input, target, reduction=self.reduction)
+Traceback (most recent call last):
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 134, in <module>
+    train(model, dataloader, task_type=task, num_epochs=20, lr=1e-3)
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 64, in train
+    loss = criterion(forecast_out, trg_forecast)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/loss.py", line 610, in forward
+    return F.mse_loss(input, target, reduction=self.reduction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/functional.py", line 3884, in mse_loss
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/functional.py", line 77, in broadcast_tensors
+    return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: The size of tensor a (34) must match the size of tensor b (2) at non-singleton dimension 3
+
+/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/loss.py:610: UserWarning: Using a target size (torch.Size([32, 15, 17, 2])) that is different to the input size (torch.Size([32, 15, 34])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.mse_loss(input, target, reduction=self.reduction)
+Traceback (most recent call last):
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 134, in <module>
+    train(model, dataloader, task_type=task, num_epochs=20, lr=1e-3)
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 64, in train
+    loss = criterion(forecast_out, trg_forecast)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/modules/loss.py", line 610, in forward
+    return F.mse_loss(input, target, reduction=self.reduction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/nn/functional.py", line 3884, in mse_loss
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/centive/.local/lib/python3.12/site-packages/torch/functional.py", line 77, in broadcast_tensors
+    return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: The size of tensor a (34) must match the size of tensor b (2) at non-singleton dimension 3
+
+
+Traceback (most recent call last):
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 134, in <module>
+    train(model, dataloader, task_type=task, num_epochs=20, lr=1e-3)
+  File "/home/centive/HumanFall/Code/Utils/train.py", line 65, in train
+    total_loss += loss.item()
+                  ^^^^
+UnboundLocalError: cannot access local variable 'loss' where it is not associated with a value
+
+	
