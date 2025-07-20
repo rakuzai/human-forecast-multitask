@@ -17,6 +17,8 @@ from models.mlp import MLP
 from models.rnn import RNNModel
 from models.lstm import LSTMModel
 from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.model_selection import KFold
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -27,7 +29,7 @@ print("Using device:", device)
 def mpjpe(pred, target):
     return torch.mean(torch.norm(pred - target, dim=-1))
 
-model_name = 'lstm'
+model_name = 'mlp'
 
 import matplotlib.pyplot as plt
 
@@ -82,7 +84,7 @@ def visualize_forecast(src, forecast_out, trg_forecast, step_name="", model_name
 # -------------------------
 # Training Loop
 # -------------------------
-def train(model, dataloader, num_epochs=10, lr=1e-3, model_name=model_name):
+def train(model, train_loader, val_loader=None, num_epochs=10, lr=1e-3, model_name="mlp"):
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_forecast = nn.MSELoss()
@@ -94,9 +96,7 @@ def train(model, dataloader, num_epochs=10, lr=1e-3, model_name=model_name):
         correct, total = 0, 0
         all_mpjpe = []
 
-        # loop = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
-
-        for src, (trg_forecast, trg_class) in dataloader:
+        for src, (trg_forecast, trg_class) in train_loader:
             src = src.to(device)
             trg_forecast = trg_forecast.to(device)
             trg_class = trg_class.to(device)
@@ -119,84 +119,109 @@ def train(model, dataloader, num_epochs=10, lr=1e-3, model_name=model_name):
             total_loss_f += loss_f.item()
             total_loss_c += loss_c.item()
 
-            # MPJPE
             all_mpjpe.append(mpjpe(forecast_out, trg_forecast).item())
 
-            # Accuracy
             pred = torch.argmax(class_out, dim=1)
             correct += (pred == torch.argmax(trg_class, dim=1)).sum().item()
             total += trg_class.size(0)
 
-            # loop.set_postfix({
-            #     "Loss": f"{loss.item():.4f}",
-            #     "Acc": f"{(correct / total):.4f}"
-            # })
-
-        avg_loss = total_loss / len(dataloader)
-        avg_loss_f = total_loss_f / len(dataloader)
-        avg_loss_c = total_loss_c / len(dataloader)
-        avg_mpjpe = sum(all_mpjpe) / len(all_mpjpe)
+        avg_loss = total_loss / len(train_loader)
+        avg_loss_f = total_loss_f / len(train_loader)
+        avg_loss_c = total_loss_c / len(train_loader)
+        avg_mpjpe = sum(all_mpjpe) / len(train_loader)
         acc = correct / total
 
-        print(f"[Epoch {epoch+1}] Total Loss: {avg_loss:.4f} | Forecast Loss: {avg_loss_f:.4f} | "
-              f"Class Loss: {avg_loss_c:.4f} | MPJPE: {avg_mpjpe:.4f} | Accuracy: {acc:.4f}")
-        
-    if epoch % 1 == 0:
-        visualize_forecast(src, forecast_out, trg_forecast, step_name=f"Epoch_{epoch+1}", model_name=model_name)
-        
+        print(f"[Epoch {epoch+1}] Train → Loss: {avg_loss:.4f} | Forecast: {avg_loss_f:.4f} | "
+              f"Class: {avg_loss_c:.4f} | MPJPE: {avg_mpjpe:.4f} | Acc: {acc:.4f}")
+
+        # Optional validation
+        if val_loader is not None:
+            model.eval()
+            val_loss_f, val_loss_c, val_mpjpe, val_correct, val_total = 0.0, 0.0, 0.0, 0, 0
+            with torch.no_grad():
+                for src, (trg_forecast, trg_class) in val_loader:
+                    src = src.to(device)
+                    trg_forecast = trg_forecast.to(device)
+                    trg_class = trg_class.to(device)
+
+                    src = src.view(src.size(0), src.size(1), -1)
+                    trg_forecast = trg_forecast.view(trg_forecast.size(0), trg_forecast.size(1), -1)
+
+                    forecast_out, class_out = model(src)
+
+                    val_loss_f += loss_forecast(forecast_out, trg_forecast).item()
+                    val_loss_c += loss_class(class_out, torch.argmax(trg_class, dim=1)).item()
+                    val_mpjpe += mpjpe(forecast_out, trg_forecast).item()
+
+                    pred = torch.argmax(class_out, dim=1)
+                    val_correct += (pred == torch.argmax(trg_class, dim=1)).sum().item()
+                    val_total += trg_class.size(0)
+
+            val_loss_f /= len(val_loader)
+            val_loss_c /= len(val_loader)
+            val_mpjpe /= len(val_loader)
+            val_acc = val_correct / val_total
+
+            print(f"[Epoch {epoch+1}] Val → Forecast: {val_loss_f:.4f} | "
+                  f"Class: {val_loss_c:.4f} | MPJPE: {val_mpjpe:.4f} | Acc: {val_acc:.4f}")
+
+        # Visualize predictions from current batch
+        # if epoch % 1 == 0:
+        #     visualize_forecast(src, forecast_out, trg_forecast, step_name=f"Epoch_{epoch+1}", model_name=model_name)
+   
 # -------------------------
 # Run Training
 # -------------------------
 if __name__ == "__main__":
     import os
     import pickle
-    import torch
     from utils.dataset import PoseDataset
-    from torch.utils.data import DataLoader
 
-    # Load preprocessed dataset from utils/dataset.pkl
+    # Load full dataset
     with open(os.path.join(os.path.dirname(__file__), "dataset.pkl"), "rb") as f:
         raw_data = pickle.load(f)
-        dataset = PoseDataset(raw_data)
 
-    dataloader = DataLoader(dataset, batch_size=32)
+    full_dataset = PoseDataset(raw_data)
 
-    # Extract input dimensions
-    input_window = len(raw_data["src"][0])              # e.g. 15
-    keypoints_dim = len(raw_data["src"][0][0]) * len(raw_data["src"][0][0][0])  # 17 * 2 = 34
+    k = 5  # Number of folds
+    kf = KFold(n_splits=k, shuffle=True, random_state=42)
 
-    if model_name == "mlp":
-        from models.mlp import MLP
-        model = MLP(
-            input_size=input_window * keypoints_dim,  # flattened
-            hidden_size=512,
-            forecast_window=input_window,
-            output_class_size=2
-        )
+    for fold, (train_idx, val_idx) in enumerate(kf.split(full_dataset)):
+        print(f"\n[INFO] Fold {fold+1}/{k}")
 
-    elif model_name == "rnn":
-        from models.rnn import RNNModel
-        model = RNNModel(
-            input_size=34,
-            hidden_size=128,
-            forecast_window=input_window,
-            output_class_size=2
-        )
+        train_subset = torch.utils.data.Subset(full_dataset, train_idx)
+        val_subset = torch.utils.data.Subset(full_dataset, val_idx)
 
-    elif model_name == "lstm":
-        from models.lstm import LSTMModel
-        model = LSTMModel(
-            input_size=34,
-            hidden_size=128,
-            forecast_window=input_window,
-            output_class_size=2
-        )
+        train_loader = DataLoader(train_subset, batch_size=32, shuffle=True)
+        val_loader = DataLoader(val_subset, batch_size=32, shuffle=False)
 
-    else:
-        raise ValueError(f"Unknown model name: {model_name}")
+        # Build model
+        if model_name == "mlp":
+            from models.mlp import MLP
+            model = MLP(
+                input_size=len(raw_data["src"][0]) * 34,
+                hidden_size=512,
+                forecast_window=len(raw_data["src"][0]),
+                output_class_size=2
+            )
+        elif model_name == "rnn":
+            from models.rnn import RNNModel
+            model = RNNModel(
+                input_size=34,
+                hidden_size=128,
+                forecast_window=len(raw_data["src"][0]),
+                output_class_size=2
+            )
+        elif model_name == "lstm":
+            from models.lstm import LSTMModel
+            model = LSTMModel(
+                input_size=34,
+                hidden_size=128,
+                forecast_window=len(raw_data["src"][0]),
+                output_class_size=2
+            )
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
 
-    model.to(device)
-
-    print(f"Using model: {model_name.upper()} for multi-task learning.")
-    from utils.train import train
-    train(model, dataloader, num_epochs=500, lr=1e-3, model_name=model_name)
+        print(f"Training Fold {fold+1}")
+        train(model, train_loader, val_loader, num_epochs=100, lr=1e-3, model_name=f"{model_name}_fold{fold+1}")
