@@ -1,15 +1,10 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
 import numpy as np
 import sys
 import os
 from tqdm import tqdm
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -29,58 +24,8 @@ def mpjpe(pred, target):
 
 model_name = "lstm"  # or "rnn", "mlp" — change this to train different models
 batch_size = 32
-num_epochs = 500 
+num_epochs = 500
 lr = 1e-3
-
-import matplotlib.pyplot as plt
-
-SKELETON_EDGES = [
-    (0, 1), (1, 2), (2, 3), (3, 4), 
-    (1, 5), (5, 6), (6, 7),
-    (1, 8), (8, 9), (9, 10),
-    (8, 11), (11, 12), (12, 13),
-    (0, 14), (0, 15), (14, 16), (15, 17)
-]
-
-def draw_pose(ax, pose, color):
-    for (i, j) in SKELETON_EDGES:
-        if i < pose.shape[0] and j < pose.shape[0]:
-            ax.plot([pose[i, 0], pose[j, 0]], [-pose[i, 1], -pose[j, 1]], color=color, linewidth=2)
-    ax.scatter(pose[:, 0], -pose[:, 1], c=color, s=10)
-
-def visualize_forecast(src, forecast_out, trg_forecast, step_name="", model_name=model_name):
-    os.makedirs("result", exist_ok=True)
-
-    src = src[7].detach().cpu().numpy()               # [input_window, 34]
-    forecast = forecast_out[7].detach().cpu().numpy() # [forecast_window, 34]
-    target = trg_forecast[7].detach().cpu().numpy()   # [forecast_window, 34]
-
-    forecast_window = min(8, forecast.shape[0])  # Limit to 8 frames
-
-    fig, axs = plt.subplots(1, forecast_window, figsize=(forecast_window * 1.5, 3))
-    for i in range(forecast_window):
-        ax = axs[i]
-        pred_pose = forecast[i].reshape(17, 2)
-        true_pose = target[i].reshape(17, 2)
-
-        draw_pose(ax, true_pose, color='blue')
-        draw_pose(ax, pred_pose, color='red')
-
-        ax.axis('off')
-        ax.set_aspect('equal')
-
-    # Manual legend
-    legend_elements = [
-        mpatches.Patch(color='blue', label='Ground Truth'),
-        mpatches.Patch(color='red', label='Prediction')
-    ]
-    fig.legend(handles=legend_elements, loc='upper center', ncol=2, fontsize=10, bbox_to_anchor=(0.5, 1.05))
-
-    plt.tight_layout()
-    save_path = f"../result/forecast_output_{model_name}_{step_name.replace(' ', '_')}.jpg"
-    plt.savefig(save_path, bbox_inches='tight')
-    plt.close()
-    print(f"Saved forecast visualization to: {save_path}")
 
 # -------------------------
 # Training Loop
@@ -98,7 +43,7 @@ def train(model, train_loader, num_epochs=10, lr=1e-3, model_name="default_model
         correct, total = 0, 0
         all_mpjpe = []
 
-        for src, (trg_forecast, trg_class) in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
+        for src, (trg_forecast, trg_class), _, _ in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
             src = src.to(device)
             trg_forecast = trg_forecast.to(device)
             trg_class = trg_class.to(device)
@@ -148,30 +93,58 @@ def train(model, train_loader, num_epochs=10, lr=1e-3, model_name="default_model
 # Run Training
 # -------------------------
 if __name__ == "__main__":
+    import re
+    import os
     import pickle
     from utils.dataset import PoseDataset
     from torch.utils.data import DataLoader
+    from collections import defaultdict, Counter
 
-# Load preprocessed dataset from utils/dataset.pkl
+    # Load preprocessed dataset from utils/dataset.pkl
     with open(os.path.join(os.path.dirname(__file__), "dataset.pkl"), "rb") as f:
         raw_data = pickle.load(f)
 
-    # === Train/Test Split Based on Subject ===
+    # Assuming you already have raw_data loaded
     subjects = raw_data["subjects"]
+    motion_types = raw_data["motion_types"]
     unique_subjects = sorted(set(subjects))
-    test_subjects = unique_subjects[-2:]  # last 2 subjects = test
-    train_data = {"src": [], "trg_forecast": [], "trg_class": [], "subjects": []}
+    train_subjects = unique_subjects[0:4]
 
+    # Prepare train_data dict
+    train_data = {
+        "src": [], "trg_forecast": [], "trg_class": [],
+        "subjects": [], "motion_types": []
+    }
+    
     for i, subj in enumerate(subjects):
-        if subj not in test_subjects:
+        if subj in train_subjects:
             train_data["src"].append(raw_data["src"][i])
             train_data["trg_forecast"].append(raw_data["trg_forecast"][i])
             train_data["trg_class"].append(raw_data["trg_class"][i])
             train_data["subjects"].append(subj)
+            train_data["motion_types"].append(raw_data["motion_types"][i])
 
-    # Create Dataset and DataLoader
-    dataset = PoseDataset(train_data)
-    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    # Create dataset and loaders
+    train_dataset = PoseDataset(train_data, return_subject=True)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+    # Kumpulan untuk menyimpan hasil
+    subject_to_motions = defaultdict(set)
+
+    # Mapping: subject -> motion_type -> jumlah window
+    subject_motion_windows = defaultdict(Counter)
+
+    # Iterasi semua batch di train_loader
+    for src, (trg_forecast, trg_class), subjects, motions in train_loader:
+        for subj, motion in zip(subjects, motions):
+            subject_motion_windows[subj][motion] += 1
+
+    # Cetak hasil
+    print("\n[INFO] Sliding window count per subject and motion type:")
+    for subj in sorted(subject_motion_windows.keys()):
+        print(f"{subj}:")
+        for motion, count in subject_motion_windows[subj].items():
+            print(f"  - {motion}: {count} sliding windows")
 
     # Extract input dimensions
     input_window = len(train_data["src"][0])  # e.g. 15

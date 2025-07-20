@@ -11,6 +11,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from collections import defaultdict, Counter
+
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.lstm import LSTMModel  # Adjust if you're using another model
@@ -28,7 +30,6 @@ SKELETON_EDGES = [
 ]
 
 def draw_pose(ax, pose, color, alpha=1.0, linewidth=2):
-    """Draw pose skeleton with proper connections"""
     for (i, j) in SKELETON_EDGES:
         if i < pose.shape[0] and j < pose.shape[0]:
             if not (np.allclose(pose[i], 0) or np.allclose(pose[j], 0)):
@@ -107,14 +108,13 @@ def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0,
             ax.set_ylim(y_min - margin * y_range, y_max + margin * y_range)
     
     # Add legend
-    legend_elements = [
-        mpatches.Patch(color='blue', label='Ground Truth', alpha=0.7),
-        mpatches.Patch(color='red', label='Prediction', alpha=0.9)
-    ]
-    fig.legend(handles=legend_elements, loc='upper center', 
-              ncol=2, fontsize=12, bbox_to_anchor=(0.5, 0.95))
+    # legend_elements = [
+    #     mpatches.Patch(color='blue', label='Ground Truth', alpha=0.7),
+    #     mpatches.Patch(color='red', label='Prediction', alpha=0.9)
+    # ]
+    # fig.legend(handles=legend_elements, loc='upper center', 
+    #           ncol=2, fontsize=12, bbox_to_anchor=(0.5, 0.95))
     
-    plt.suptitle(f'Cross-Window Visualization (Stride: {frame_stride})', fontsize=14)
     plt.tight_layout()
     plt.subplots_adjust(top=0.85)
     
@@ -125,36 +125,55 @@ def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0,
     
     print(f"[INFO] Saved cross-window visualization to {save_path}")
 
-
-def evaluate(model_path="../models/lstm_500.pt", batch_size=32):
+def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion="5_forward_falls"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load dataset
-    dataset_path = os.path.join(os.path.dirname(__file__), "dataset.pkl")
-    with open(dataset_path, "rb") as f:
-        data = pickle.load(f)
+    # Load preprocessed dataset from utils/dataset.pkl
+    with open(os.path.join(os.path.dirname(__file__), "dataset.pkl"), "rb") as f:
+        raw_data = pickle.load(f)
 
-    # Select test subjects (last 2)
-    subjects = data["subjects"]
+    # Assuming you already have raw_data loaded
+    subjects = raw_data["subjects"]
+    motion_types = raw_data["motion_types"]
     unique_subjects = sorted(set(subjects))
     test_subjects = unique_subjects[-2:]
 
-    test_data = {"src": [], "trg_forecast": [], "trg_class": [], "subjects": []}
+    # Prepare train_data dict
+    test_data = {
+        "src": [], "trg_forecast": [], "trg_class": [],
+        "subjects": [], "motion_types": []
+    }
+
     for i, subj in enumerate(subjects):
         if subj in test_subjects:
-            test_data["src"].append(data["src"][i])
-            test_data["trg_forecast"].append(data["trg_forecast"][i])
-            test_data["trg_class"].append(data["trg_class"][i])
+            test_data["src"].append(raw_data["src"][i])
+            test_data["trg_forecast"].append(raw_data["trg_forecast"][i])
+            test_data["trg_class"].append(raw_data["trg_class"][i])
             test_data["subjects"].append(subj)
+            test_data["motion_types"].append(raw_data["motion_types"][i])
 
-    test_dataset = PoseDataset(test_data)
+    # Create dataset and loaders
+    test_dataset = PoseDataset(test_data, return_subject=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    # Infer input_window from data
+    # Mapping: subject -> motion_type -> jumlah window
+    subject_motion_windows = defaultdict(Counter)
+
+    # Iterasi semua batch di test_loader
+    for src, (trg_forecast, trg_class), subjects, motions in test_loader:
+        for subj, motion in zip(subjects, motions):
+            subject_motion_windows[subj][motion] += 1
+
+    # Cetak hasil
+    print("\n[INFO] Sliding window count per subject and motion type:")
+    for subj in sorted(subject_motion_windows.keys()):
+        print(f"{subj}:")
+        for motion, count in subject_motion_windows[subj].items():
+            print(f"  - {motion}: {count} sliding windows")
+
     input_window = len(test_data["src"][0])
     input_dim = len(test_data["src"][0][0]) * len(test_data["src"][0][0][0])  # 17 * 2 = 34
 
-    # Load model
     model = LSTMModel(
         input_size=34,
         hidden_size=128,
@@ -165,17 +184,33 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32):
     model.to(device)
     model.eval()
 
-    # Evaluation
+    # Losses and metrics
     loss_forecast = torch.nn.MSELoss()
     loss_class = torch.nn.CrossEntropyLoss()
-
     total_loss_f = 0.0
     total_loss_c = 0.0
     correct, total = 0, 0
     all_mpjpe = []
 
+    visualized = False
+
     with torch.no_grad():
-        for idx, (src, (trg_forecast, trg_class)) in enumerate(test_loader):
+        total_loss_f, total_loss_c = 0.0, 0.0
+        correct, total = 0, 0
+        all_mpjpe = []
+        visualized = False
+        motion_forecast = []
+        motion_target = []
+
+        # First loop: collect all forecast/target matching visualize_motion
+        for idx, batch in enumerate(test_loader):
+            if len(batch) == 4:
+                src, (trg_forecast, trg_class), subjects, motions = batch
+            else:
+                src, (trg_forecast, trg_class) = batch
+                print("batch size only has 2 elements")
+                continue
+
             src = src.to(device)
             trg_forecast = trg_forecast.to(device)
             trg_class = trg_class.to(device)
@@ -185,37 +220,54 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32):
 
             forecast_out, class_out = model(src)
 
+            # Loss and accuracy
             loss_f = loss_forecast(forecast_out, trg_forecast)
             loss_c = loss_class(class_out, torch.argmax(trg_class, dim=1))
 
             total_loss_f += loss_f.item() * src.size(0)
             total_loss_c += loss_c.item() * src.size(0)
+
             pred = torch.argmax(class_out, dim=1)
             correct += (pred == torch.argmax(trg_class, dim=1)).sum().item()
             total += trg_class.size(0)
 
             all_mpjpe.append(mpjpe(forecast_out, trg_forecast).item())
 
-            if idx==1:
-                print(f"[INFO] Visualizing batch {idx}")
-                visualize_cross_windows(
-                    forecast_out.cpu().numpy(),   # shape: [batch_size, forecast_window, 34]
-                    trg_forecast.cpu().numpy(),   # same shape as forecast_out
-                    model_name="lstm",
-                    batch_idx=idx,
-                    start_sample=0,
-                    frame_stride=5,
-                    num_frames=8
-                )
+            # Check each motion in the batch
+            for i in range(len(motions)):
+                motion_str = motions[i]
+                if isinstance(motion_str, bytes):
+                    motion_str = motion_str.decode('utf-8')
 
-    avg_loss_f = total_loss_f / total
-    avg_loss_c = total_loss_c / total
-    avg_mpjpe = sum(all_mpjpe) / len(all_mpjpe)
-    acc = correct / total
+                if motion_str == visualize_motion:
+                    motion_forecast.append(forecast_out[i:i+1].cpu())  # shape: (1, seq_len, dim)
+                    motion_target.append(trg_forecast[i:i+1].cpu())
 
-    print(f"[Evaluation] Forecast Loss: {avg_loss_f:.4f} | Class Loss: {avg_loss_c:.4f} | "
-          f"MPJPE: {avg_mpjpe:.4f} | Accuracy: {acc:.4f}")
-    
+        # After all batches, visualize the motion if collected
+        if motion_forecast and not visualized:
+            pred_all = torch.cat(motion_forecast, dim=0).numpy()
+            target_all = torch.cat(motion_target, dim=0).numpy()
 
+            print(f"[INFO] Visualizing full motion: {visualize_motion} with {pred_all.shape[0]} windows")
+            visualize_cross_windows(
+                pred_all,
+                target_all,
+                model_name="lstm",
+                batch_idx=0,           # optional, used for debug print
+                start_sample=0,
+                frame_stride=135,        # or 15 or whatever you want
+                num_frames=8           # increase if you want more frames shown
+            )
+            visualized = True
+
+        # Final report
+        avg_loss_f = total_loss_f / total
+        avg_loss_c = total_loss_c / total
+        avg_mpjpe = sum(all_mpjpe) / len(all_mpjpe)
+        acc = correct / total
+
+        print(f"[Evaluation] Forecast Loss: {avg_loss_f:.4f} | Class Loss: {avg_loss_c:.4f} | "
+            f"MPJPE: {avg_mpjpe:.4f} | Accuracy: {acc:.4f}")
+        
 if __name__ == "__main__":
     evaluate()
