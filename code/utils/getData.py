@@ -7,8 +7,12 @@ from ultralytics import YOLO
 from torch.utils.data import Dataset
 
 class getData(Dataset):
-    def __init__(self, folder="../../frames/", input_window=15, output_window=15, step=5, pkl=True, pkl_path="dataset.pkl"):
-        self.src, self.trg_forecast, self.trg_class = [], [], []
+    def __init__(self, folder="../../frames/", input_window=15, output_window=15, step=5,
+                 pkl=True, pkl_path="dataset.pkl"):
+        self.src = []
+        self.trg_forecast = []
+        self.trg_class = []
+        self.subjects = []  # Track subject for each sample
         to_onehot = np.eye(2)
 
         if pkl and os.path.exists(pkl_path):
@@ -18,6 +22,7 @@ class getData(Dataset):
                 self.src = data['src']
                 self.trg_forecast = data['trg_forecast']
                 self.trg_class = data['trg_class']
+                self.subjects = data['subjects']
             return
 
         print("[INFO] Extracting keypoints with YOLO...")
@@ -28,7 +33,7 @@ class getData(Dataset):
             if not os.path.isdir(subject_path):
                 continue
 
-            for subject in os.listdir(subject_path):  # subject-1, subject-2, ...
+            for subject in sorted(os.listdir(subject_path)):  # subject-1, subject-2, ...
                 subject_dir = os.path.join(subject_path, subject)
                 if not os.path.isdir(subject_dir):
                     continue
@@ -58,7 +63,7 @@ class getData(Dataset):
                     keypoints_in_video = []
                     failed_count = 0
 
-                    for idx, frame in enumerate(frames):
+                    for frame in frames:
                         keypoints = []
                         output = model(frame, save=False, verbose=False)
                         if output and output[0].keypoints is not None and len(output[0].keypoints) > 0:
@@ -74,27 +79,29 @@ class getData(Dataset):
 
                     print(f"[INFO] {subject_type}/{subject}/{motion} → Failed frames: {failed_count}")
 
+                    subject_key = f"{subject_type}/{subject}"
+
                     # Sliding window with labels
                     for slider in range(0, len(keypoints_in_video) - input_window - output_window + 1, step):
                         src_seq = keypoints_in_video[slider:slider + input_window]
                         trg_seq = keypoints_in_video[slider + input_window:slider + input_window + output_window]
                         class_seq = labels[slider + input_window:slider + input_window + output_window]
 
-                        # Majority label in forecast window
                         majority_label = int(np.round(np.mean(class_seq)))
 
                         self.src.append(src_seq)
                         self.trg_forecast.append(trg_seq)
                         self.trg_class.append(to_onehot[majority_label])
+                        self.subjects.append(subject_key)
 
-        # Save extracted pose data
         if pkl:
             print(f"[INFO] Saving extracted pose data to {pkl_path}...")
             with open(pkl_path, 'wb') as f:
                 pickle.dump({
                     'src': self.src,
                     'trg_forecast': self.trg_forecast,
-                    'trg_class': self.trg_class
+                    'trg_class': self.trg_class,
+                    'subjects': self.subjects
                 }, f)
 
     def __len__(self):
