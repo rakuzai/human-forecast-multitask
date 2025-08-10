@@ -1,10 +1,14 @@
 import torch
+import time
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
 import sys
 import os
 from tqdm import tqdm
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -22,26 +26,32 @@ print("Using device:", device)
 def mpjpe(pred, target):
     return torch.mean(torch.norm(pred - target, dim=-1))
 
-model_name = "lstm"  # or "rnn", "mlp" — change this to train different models
+model_name = "lstm"  
 batch_size = 32
-num_epochs = 500
-lr = 1e-3
+num_epochs = 1000
+lr = 1e-4
 
 # -------------------------
 # Training Loop
 # -------------------------
-def train(model, train_loader, num_epochs=10, lr=1e-3, model_name="default_model"):
+def train(model, train_loader, num_epochs=10, lr=1e-4, model_name="default_model"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_forecast = nn.MSELoss()
     loss_class = nn.CrossEntropyLoss()
 
+    epoch_losses = []
+    start_time = time.time()
+    all_preds, all_labels = [], []
+
     for epoch in range(num_epochs):
         model.train()
         total_loss, total_loss_f, total_loss_c = 0.0, 0.0, 0.0
         correct, total = 0, 0
         all_mpjpe = []
+
+        y_true_epoch, y_pred_epoch = [], []
 
         for src, (trg_forecast, trg_class), _, _ in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
             src = src.to(device)
@@ -66,9 +76,16 @@ def train(model, train_loader, num_epochs=10, lr=1e-3, model_name="default_model
             total_loss_c += loss_c.item() * src.size(0)
 
             all_mpjpe.append(mpjpe(forecast_out, trg_forecast).item())
-            pred = torch.argmax(class_out, dim=1)
-            correct += (pred == torch.argmax(trg_class, dim=1)).sum().item()
+            preds = torch.argmax(class_out, dim=1)
+            labels = torch.argmax(trg_class, dim=1)
+            correct += (preds == torch.argmax(trg_class, dim=1)).sum().item()
             total += trg_class.size(0)
+
+            y_pred_epoch.extend(preds.cpu().numpy())
+            y_true_epoch.extend(labels.cpu().numpy())
+
+        all_preds.extend(y_pred_epoch)
+        all_labels.extend(y_true_epoch)
 
         avg_loss = total_loss / total
         avg_loss_f = total_loss_f / total
@@ -76,35 +93,49 @@ def train(model, train_loader, num_epochs=10, lr=1e-3, model_name="default_model
         avg_mpjpe = sum(all_mpjpe) / len(all_mpjpe)
         acc = correct / total
 
+        epoch_losses.append(avg_loss)
+
         print(f"[Epoch {epoch+1}] Train → Loss: {avg_loss:.4f} | Forecast: {avg_loss_f:.4f} | "
               f"Class: {avg_loss_c:.4f} | MPJPE: {avg_mpjpe:.4f} | Acc: {acc:.4f}")
+        
+        cm = confusion_matrix(y_true_epoch, y_pred_epoch)
+        print(f"[Epoch {epoch+1}] Confusion Matrix:\n{cm}")
 
-        # # Optional: visualize prediction after final epoch
-        # if epoch == num_epochs - 1:
-        #     visualize_forecast(src, forecast_out, trg_forecast, step_name=f"Epoch_{epoch+1}", model_name=model_name)
+    end_time = time.time()
+    total_minutes = (end_time - start_time) / 60
+    print(f"[INFO] Total Training Time: {total_minutes:.2f} minutes")
 
     # Save the model to ../models/
-    model_path = f"../models/{model_name}_{num_epochs}.pt"
+    model_path = f"../results/saved_models/{model_name}_{num_epochs}.pt"
     torch.save(model.state_dict(), model_path)
 
     print(f"[INFO] Model saved to {model_path}")
+
+    # Plot and save loss curve
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, num_epochs + 1), epoch_losses, color='blue', linewidth=2)
+    plt.title("Training Loss Over Epochs (RNN)", fontsize=14)
+    plt.xlabel("Epoch", fontsize=12)
+    plt.ylabel("Total Loss", fontsize=12)
+    plt.grid(True)
+    plt.tight_layout()
+    loss_plot_path = f"../results/plots/{model_name}_loss_curve_{num_epochs}.png"
+    plt.savefig(loss_plot_path, dpi=600)
+    print(f"[INFO] Loss curve saved to {loss_plot_path}")
 
 # -------------------------
 # Run Training
 # -------------------------
 if __name__ == "__main__":
-    import re
     import os
     import pickle
     from utils.dataset import PoseDataset
     from torch.utils.data import DataLoader
     from collections import defaultdict, Counter
 
-    # Load preprocessed dataset from utils/dataset.pkl
     with open(os.path.join(os.path.dirname(__file__), "dataset.pkl"), "rb") as f:
         raw_data = pickle.load(f)
 
-    # Assuming you already have raw_data loaded
     subjects = raw_data["subjects"]
     motion_types = raw_data["motion_types"]
     unique_subjects = sorted(set(subjects))
@@ -124,42 +155,35 @@ if __name__ == "__main__":
             train_data["subjects"].append(subj)
             train_data["motion_types"].append(raw_data["motion_types"][i])
 
-    # Create dataset and loaders
     train_dataset = PoseDataset(train_data, return_subject=True)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-    # Kumpulan untuk menyimpan hasil
     subject_to_motions = defaultdict(set)
 
-    # Mapping: subject -> motion_type -> jumlah window
     subject_motion_windows = defaultdict(Counter)
 
-    # Iterasi semua batch di train_loader
     for src, (trg_forecast, trg_class), subjects, motions in train_loader:
         for subj, motion in zip(subjects, motions):
             subject_motion_windows[subj][motion] += 1
 
-    # Cetak hasil
     print("\n[INFO] Sliding window count per subject and motion type:")
     for subj in sorted(subject_motion_windows.keys()):
         print(f"{subj}:")
         for motion, count in subject_motion_windows[subj].items():
             print(f"  - {motion}: {count} sliding windows")
 
-    # Extract input dimensions
     input_window = len(train_data["src"][0])  # e.g. 15
     keypoints_dim = len(train_data["src"][0][0]) * len(train_data["src"][0][0][0])  # 17 * 2 = 34
 
-    # Build model
     if model_name == "mlp":
         from models.mlp import MLP
         model = MLP(
             input_size=input_window * keypoints_dim,
-            hidden_size=512,
+            hidden_size=128,
             forecast_window=input_window,
             output_class_size=2
         )
-
+    
     elif model_name == "rnn":
         from models.rnn import RNNModel
         model = RNNModel(

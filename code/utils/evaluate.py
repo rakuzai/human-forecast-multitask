@@ -13,11 +13,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from collections import defaultdict, Counter
 
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from models.lstm import LSTMModel  # Adjust if you're using another model
+from models.lstm import LSTMModel
+from models.rnn import RNNModel
+from models.mlp import MLP  
 
-# Your existing skeleton edges
 SKELETON_EDGES = [
     (0, 1), (0, 2), (1, 3), (2, 4),     # Head connections
     (5, 6),                              # Shoulder to shoulder
@@ -41,13 +41,52 @@ def draw_pose(ax, pose, color, alpha=1.0, linewidth=2):
               c=color, s=30, alpha=alpha, 
               edgecolors='white', linewidth=0.5, zorder=10)
 
+def visualize_single_frame(pred_batch, tgt_batch, model_name, window_idx=36, frame_idx=0):
+    os.makedirs("../results/plots", exist_ok=True)
+
+    pred_pose = pred_batch[window_idx, frame_idx].reshape(17, 2)
+    true_pose = tgt_batch[window_idx, frame_idx].reshape(17, 2)
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    draw_pose(ax, true_pose, color='blue', alpha=0.7, linewidth=3)
+    draw_pose(ax, pred_pose, color='red', alpha=0.9, linewidth=2)
+
+    ax.set_aspect('equal')
+    ax.axis('off')
+
+    all_points = np.concatenate([pred_pose, true_pose], axis=0)
+    valid_points = all_points[~np.all(np.isclose(all_points, 0), axis=1)]
+
+    if len(valid_points) > 0:
+        margin = 0.1
+        x_min, x_max = valid_points[:, 0].min(), valid_points[:, 0].max()
+        y_min, y_max = -valid_points[:, 1].max(), -valid_points[:, 1].min()
+
+        x_range = x_max - x_min
+        y_range = y_max - y_min
+
+        ax.set_xlim(x_min - margin * x_range, x_max + margin * x_range)
+        ax.set_ylim(y_min - margin * y_range, y_max + margin * y_range)
+
+    legend_elements = [
+        mpatches.Patch(color='blue', label='Ground Truth', alpha=0.7),
+        mpatches.Patch(color='red', label='Prediction', alpha=0.9)
+    ]
+    fig.legend(handles=legend_elements, loc='upper center', 
+               bbox_to_anchor=(0.5, 1.02), ncol=2, fontsize=10)
+
+    plt.tight_layout()
+    save_path = f"../results/plots/prediction_single_{model_name}_W{window_idx}_F{frame_idx}.jpg"
+    plt.savefig(save_path, bbox_inches='tight', dpi=600)
+    plt.close()
+    print(f"[INFO] Saved single-frame visualization to {save_path}")
+
 def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0, 
                            start_sample=0, frame_stride=3, num_frames=8):
-    os.makedirs("../result", exist_ok=True)
+    os.makedirs("../results", exist_ok=True)
     
     batch_size, seq_len, pose_dim = pred_batch.shape  # (32, 15, 34)
     
-    # Calculate which sliding windows and frames we need
     selected_frames = []
     selected_windows = []
     current_sample = start_sample
@@ -69,7 +108,6 @@ def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0,
     
     print(f"[INFO] Using {len(selected_frames)} frames from windows {selected_windows} at frames {selected_frames}")
     
-    # Create visualization
     fig, axs = plt.subplots(1, len(selected_frames), 
                            figsize=(len(selected_frames) * 3, 4))
     
@@ -79,20 +117,15 @@ def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0,
     for i, (window_idx, frame_idx) in enumerate(zip(selected_windows, selected_frames)):
         ax = axs[i]
         
-        # Get poses from specific window and frame
         pred_pose = pred_batch[window_idx, frame_idx].reshape(17, 2)
         true_pose = tgt_batch[window_idx, frame_idx].reshape(17, 2)
         
-        # Draw poses
         draw_pose(ax, true_pose, color='blue', alpha=0.7, linewidth=3)
         draw_pose(ax, pred_pose, color='red', alpha=0.9, linewidth=2)
         
-        # Set axis properties
         ax.set_aspect('equal')
         ax.axis('off')
-        ax.set_title(f'W{window_idx}_F{frame_idx}', fontsize=10, pad=10)
         
-        # Set reasonable axis limits
         all_points = np.concatenate([pred_pose, true_pose], axis=0)
         valid_points = all_points[~np.all(np.isclose(all_points, 0), axis=1)]
         
@@ -107,38 +140,33 @@ def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0,
             ax.set_xlim(x_min - margin * x_range, x_max + margin * x_range)
             ax.set_ylim(y_min - margin * y_range, y_max + margin * y_range)
     
-    # Add legend
-    # legend_elements = [
-    #     mpatches.Patch(color='blue', label='Ground Truth', alpha=0.7),
-    #     mpatches.Patch(color='red', label='Prediction', alpha=0.9)
-    # ]
-    # fig.legend(handles=legend_elements, loc='upper center', 
-    #           ncol=2, fontsize=12, bbox_to_anchor=(0.5, 0.95))
+    legend_elements = [
+        mpatches.Patch(color='blue', label='Ground Truth', alpha=0.7),
+        mpatches.Patch(color='red', label='Prediction', alpha=0.9)
+    ]
+    fig.legend(handles=legend_elements, loc='upper center', 
+              ncol=2, fontsize=12, bbox_to_anchor=(0.5, 0.95))
     
     plt.tight_layout()
     plt.subplots_adjust(top=0.85)
     
-    # Save figure
-    save_path = f"../result/cross_window_viz_{model_name}_batch{batch_idx}_stride{frame_stride}.jpg"
-    plt.savefig(save_path, bbox_inches='tight', dpi=150)
+    save_path = f"../results/plots/prediction_viz_{model_name}_batch_{batch_idx}_stride_{frame_stride}.jpg"
+    plt.savefig(save_path, bbox_inches='tight', dpi=600)
     plt.close()
     
     print(f"[INFO] Saved cross-window visualization to {save_path}")
 
-def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion="5_forward_falls"):
+def evaluate(model_path="../results/saved_models/mlp_1000.pt", batch_size=32, visualize_motion="5_forward_falls"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load preprocessed dataset from utils/dataset.pkl
     with open(os.path.join(os.path.dirname(__file__), "dataset.pkl"), "rb") as f:
         raw_data = pickle.load(f)
 
-    # Assuming you already have raw_data loaded
     subjects = raw_data["subjects"]
     motion_types = raw_data["motion_types"]
     unique_subjects = sorted(set(subjects))
     test_subjects = unique_subjects[-2:]
 
-    # Prepare train_data dict
     test_data = {
         "src": [], "trg_forecast": [], "trg_class": [],
         "subjects": [], "motion_types": []
@@ -152,19 +180,15 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
             test_data["subjects"].append(subj)
             test_data["motion_types"].append(raw_data["motion_types"][i])
 
-    # Create dataset and loaders
     test_dataset = PoseDataset(test_data, return_subject=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    # Mapping: subject -> motion_type -> jumlah window
     subject_motion_windows = defaultdict(Counter)
 
-    # Iterasi semua batch di test_loader
     for src, (trg_forecast, trg_class), subjects, motions in test_loader:
         for subj, motion in zip(subjects, motions):
             subject_motion_windows[subj][motion] += 1
 
-    # Cetak hasil
     print("\n[INFO] Sliding window count per subject and motion type:")
     for subj in sorted(subject_motion_windows.keys()):
         print(f"{subj}:")
@@ -172,10 +196,10 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
             print(f"  - {motion}: {count} sliding windows")
 
     input_window = len(test_data["src"][0])
-    input_dim = len(test_data["src"][0][0]) * len(test_data["src"][0][0][0])  # 17 * 2 = 34
+    keypoints_dim = len(test_data["src"][0][0]) * len(test_data["src"][0][0][0])  # 17 * 2 = 34
 
-    model = LSTMModel(
-        input_size=34,
+    model = MLP(
+        input_size=input_window * keypoints_dim,
         hidden_size=128,
         forecast_window=input_window,
         output_class_size=2
@@ -184,7 +208,6 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
     model.to(device)
     model.eval()
 
-    # Losses and metrics
     loss_forecast = torch.nn.MSELoss()
     loss_class = torch.nn.CrossEntropyLoss()
     total_loss_f = 0.0
@@ -202,7 +225,6 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
         motion_forecast = []
         motion_target = []
 
-        # First loop: collect all forecast/target matching visualize_motion
         for idx, batch in enumerate(test_loader):
             if len(batch) == 4:
                 src, (trg_forecast, trg_class), subjects, motions = batch
@@ -220,7 +242,6 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
 
             forecast_out, class_out = model(src)
 
-            # Loss and accuracy
             loss_f = loss_forecast(forecast_out, trg_forecast)
             loss_c = loss_class(class_out, torch.argmax(trg_class, dim=1))
 
@@ -233,7 +254,6 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
 
             all_mpjpe.append(mpjpe(forecast_out, trg_forecast).item())
 
-            # Check each motion in the batch
             for i in range(len(motions)):
                 motion_str = motions[i]
                 if isinstance(motion_str, bytes):
@@ -243,7 +263,6 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
                     motion_forecast.append(forecast_out[i:i+1].cpu())  # shape: (1, seq_len, dim)
                     motion_target.append(trg_forecast[i:i+1].cpu())
 
-        # After all batches, visualize the motion if collected
         if motion_forecast and not visualized:
             pred_all = torch.cat(motion_forecast, dim=0).numpy()
             target_all = torch.cat(motion_target, dim=0).numpy()
@@ -252,15 +271,26 @@ def evaluate(model_path="../models/lstm_500.pt", batch_size=32, visualize_motion
             visualize_cross_windows(
                 pred_all,
                 target_all,
-                model_name="lstm",
-                batch_idx=0,           # optional, used for debug print
+                model_name="mlp",
+                batch_idx=0,           
                 start_sample=0,
-                frame_stride=135,        # or 15 or whatever you want
-                num_frames=8           # increase if you want more frames shown
+                frame_stride=135,        
+                num_frames=8          
             )
             visualized = True
 
-        # Final report
+        # visualize only W36 F0
+        if pred_all.shape[0] > 36:
+            visualize_single_frame(
+                pred_all,
+                target_all,
+                model_name="mlp",
+                window_idx=36,
+                frame_idx=0
+            )
+        else:
+            print("[WARNING] Not enough windows to extract window 36.")
+
         avg_loss_f = total_loss_f / total
         avg_loss_c = total_loss_c / total
         avg_mpjpe = sum(all_mpjpe) / len(all_mpjpe)

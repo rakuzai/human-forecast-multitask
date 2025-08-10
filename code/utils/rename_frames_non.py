@@ -20,14 +20,12 @@ def rename_frames_to_zero(folder_path):
     renamed_count = 0
 
     for f in files:
-        # Ambil nomor frame dari nama file
         try:
             frame_num = int(f.split("_")[-1].split(".")[0])
         except ValueError:
             print(f"[SKIP] Format file tidak sesuai: {f}")
             continue
 
-        # Selalu beri label 0
         frame_base = f.split("_")[-1]
         new_name = f"0_frame_{frame_base}"
 
