@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 class getData(Dataset):
     def __init__(self, folder="../../frames/", input_window=15, output_window=15, step=5,
-                 pkl=True, pkl_path="dataset.pkl"):
+                 pkl=True, pkl_path="../dataset.pkl"):
         self.src = []
         self.trg_forecast = []
         self.trg_class = []

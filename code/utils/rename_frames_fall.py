@@ -1,6 +1,5 @@
 import os
 
-# Informasi fall_start untuk setiap folder video
 fall_start_info = {
     "subject-1": {
         "1_backward_falls": 114,
