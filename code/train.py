@@ -119,7 +119,7 @@ def train(model, train_loader, num_epochs=10, lr=1e-4, model_name="default_model
     plt.ylabel("Total Loss", fontsize=12)
     plt.grid(True)
     plt.tight_layout()
-    loss_plot_path = f"results/plots/{model_name}_loss_curve_{num_epochs}.png"
+    loss_plot_path = f"results/plots/{model_name}_loss_curveee_{num_epochs}.png"
     plt.savefig(loss_plot_path, dpi=600)
     print(f"[INFO] Loss curve saved to {loss_plot_path}")
 

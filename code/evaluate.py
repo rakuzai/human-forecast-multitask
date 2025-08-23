@@ -76,7 +76,7 @@ def visualize_single_frame(pred_batch, tgt_batch, model_name, window_idx=36, fra
                bbox_to_anchor=(0.5, 1.02), ncol=2, fontsize=10)
 
     plt.tight_layout()
-    save_path = f"results/plots/prediction_single_{model_name}_W{window_idx}_F{frame_idx}.jpg"
+    save_path = f"results/plots/prediction_singleee_{model_name}_W{window_idx}_F{frame_idx}.jpg"
     plt.savefig(save_path, bbox_inches='tight', dpi=600)
     plt.close()
     print(f"[INFO] Saved single-frame visualization to {save_path}")
@@ -150,13 +150,13 @@ def visualize_cross_windows(pred_batch, tgt_batch, model_name, batch_idx=0,
     plt.tight_layout()
     plt.subplots_adjust(top=0.85)
     
-    save_path = f"results/plots/prediction_viz_{model_name}_batch_{batch_idx}_stride_{frame_stride}.jpg"
+    save_path = f"results/plots/prediction_vizzz_{model_name}_batch_{batch_idx}_stride_{frame_stride}.jpg"
     plt.savefig(save_path, bbox_inches='tight', dpi=600)
     plt.close()
     
     print(f"[INFO] Saved cross-window visualization to {save_path}")
 
-def evaluate(model_path="results/saved_models/lstm_10.pt", batch_size=32, visualize_motion="5_forward_falls"):
+def evaluate(model_path="results/saved_models/lstm_1000.pt", batch_size=32, visualize_motion="5_forward_falls"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with open(os.path.join(os.path.dirname(__file__), "dataset.pkl"), "rb") as f:
